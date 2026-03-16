@@ -33,8 +33,11 @@ void AimControl::Reset()
     derivative_y_ = 0.0f;
     filtered_move_x_ = 0.0f;
     filtered_move_y_ = 0.0f;
+    quantizer_carry_x_ = 0.0f;
+    quantizer_carry_y_ = 0.0f;
     prev_cmd_dx_ = 0;
     prev_cmd_dy_ = 0;
+    sticky_hold_active_ = false;
     last_update_time_ = std::chrono::steady_clock::time_point{};
     last_debug_ = {};
 }
@@ -105,7 +108,32 @@ void AimControl::MoveToTarget(
     const float dist2 = dx * dx + dy * dy;
     last_debug_.error_x = dx;
     last_debug_.error_y = dy;
-    last_debug_.error_dist = std::sqrt(dist2);
+    const float dist = std::sqrt(dist2);
+    last_debug_.error_dist = dist;
+
+    const float sticky_enter = std::max(0.0f, sticky_hold_enter_px_);
+    const float sticky_exit = std::max(sticky_enter, sticky_hold_exit_px_);
+    if (!sticky_hold_active_ && dist <= sticky_enter)
+    {
+        sticky_hold_active_ = true;
+    }
+    if (sticky_hold_active_)
+    {
+        if (dist <= sticky_exit)
+        {
+            integral_x_ *= 0.6f;
+            integral_y_ *= 0.6f;
+            filtered_move_x_ *= 0.4f;
+            filtered_move_y_ *= 0.4f;
+            quantizer_carry_x_ = 0.0f;
+            quantizer_carry_y_ = 0.0f;
+            prev_cmd_dx_ = 0;
+            prev_cmd_dy_ = 0;
+            return;
+        }
+        sticky_hold_active_ = false;
+    }
+
     if (dist2 <= deadzone_px_ * deadzone_px_)
     {
         // Decay controller memory near center to avoid oscillation.
@@ -113,6 +141,8 @@ void AimControl::MoveToTarget(
         integral_y_ *= 0.7f;
         filtered_move_x_ *= 0.5f;
         filtered_move_y_ *= 0.5f;
+        quantizer_carry_x_ = 0.0f;
+        quantizer_carry_y_ = 0.0f;
         prev_cmd_dx_ = 0;
         prev_cmd_dy_ = 0;
         last_debug_.in_deadzone = true;
@@ -193,7 +223,6 @@ void AimControl::MoveToTarget(
     last_debug_.move_raw_y = move_dy;
 
     // Additional damping near center to suppress jitter.
-    const float dist = std::sqrt(dist2);
     if (dist < near_zone_px_)
     {
         const float ratio = std::clamp(dist / std::max(near_zone_px_, 1e-3f), 0.0f, 1.0f);
@@ -266,19 +295,54 @@ void AimControl::MoveToTarget(
 
     if (use_relative_mode)
     {
-        int cmd_dx = static_cast<int>(std::lround(move_dx));
-        int cmd_dy = static_cast<int>(std::lround(move_dy));
-
         if (dist < micro_error_px_)
         {
             if (std::fabs(move_dx) < micro_move_deadband_px_)
             {
-                cmd_dx = 0;
+                move_dx = 0.0f;
             }
             if (std::fabs(move_dy) < micro_move_deadband_px_)
             {
-                cmd_dy = 0;
+                move_dy = 0.0f;
             }
+            // Bleed quantizer carry near center to avoid tiny back-and-forth drift.
+            quantizer_carry_x_ *= 0.5f;
+            quantizer_carry_y_ *= 0.5f;
+        }
+
+        const bool use_quantizer = dist <= std::max(0.0f, quantizer_enable_error_px_);
+        int cmd_dx = 0;
+        int cmd_dy = 0;
+        if (use_quantizer)
+        {
+            const float carry_decay = std::clamp(quantizer_carry_decay_, 0.0f, 1.0f);
+            const float carry_flip_damp = std::clamp(quantizer_flip_damping_, 0.0f, 1.0f);
+            const float carry_max = std::max(0.5f, quantizer_max_carry_px_);
+            if (quantizer_carry_x_ * move_dx < 0.0f)
+            {
+                quantizer_carry_x_ *= carry_flip_damp;
+            }
+            if (quantizer_carry_y_ * move_dy < 0.0f)
+            {
+                quantizer_carry_y_ *= carry_flip_damp;
+            }
+            quantizer_carry_x_ =
+                std::clamp(quantizer_carry_x_ * carry_decay + move_dx, -carry_max, carry_max);
+            quantizer_carry_y_ =
+                std::clamp(quantizer_carry_y_ * carry_decay + move_dy, -carry_max, carry_max);
+
+            cmd_dx = static_cast<int>(std::lround(quantizer_carry_x_));
+            cmd_dy = static_cast<int>(std::lround(quantizer_carry_y_));
+            quantizer_carry_x_ -= static_cast<float>(cmd_dx);
+            quantizer_carry_y_ -= static_cast<float>(cmd_dy);
+        }
+        else
+        {
+            // For medium/far errors, avoid quantization lag and move directly.
+            quantizer_carry_x_ = 0.0f;
+            quantizer_carry_y_ = 0.0f;
+            cmd_dx = static_cast<int>(std::lround(move_dx));
+            cmd_dy = static_cast<int>(std::lround(move_dy));
         }
 
         if (dist < flip_suppress_error_px_)
@@ -322,6 +386,8 @@ void AimControl::MoveToTarget(
 
     const float next_x = std::clamp(source_x + move_dx, 0.0f, static_cast<float>(screen_width - 1));
     const float next_y = std::clamp(source_y + move_dy, 0.0f, static_cast<float>(screen_height - 1));
+    quantizer_carry_x_ = 0.0f;
+    quantizer_carry_y_ = 0.0f;
     last_debug_.cmd_dx = static_cast<int>(std::lround(next_x - source_x));
     last_debug_.cmd_dy = static_cast<int>(std::lround(next_y - source_y));
     prev_cmd_dx_ = last_debug_.cmd_dx;

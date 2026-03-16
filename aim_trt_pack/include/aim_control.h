@@ -75,6 +75,12 @@ private:
     float micro_move_deadband_px_ = config::kAimMicroMoveDeadbandPx;
     float flip_suppress_error_px_ = config::kAimFlipSuppressErrorPx;
     int flip_suppress_cmd_px_ = config::kAimFlipSuppressCmdPx;
+    float quantizer_carry_decay_ = config::kAimQuantizerCarryDecay;
+    float quantizer_flip_damping_ = config::kAimQuantizerFlipDamping;
+    float quantizer_max_carry_px_ = config::kAimQuantizerMaxCarryPx;
+    float quantizer_enable_error_px_ = config::kAimQuantizerEnableErrorPx;
+    float sticky_hold_enter_px_ = config::kAimStickyHoldEnterPx;
+    float sticky_hold_exit_px_ = config::kAimStickyHoldExitPx;
 
     bool pid_initialized_ = false;
     float prev_error_x_ = 0.0f;
@@ -85,8 +91,11 @@ private:
     float derivative_y_ = 0.0f;
     float filtered_move_x_ = 0.0f;
     float filtered_move_y_ = 0.0f;
+    float quantizer_carry_x_ = 0.0f;
+    float quantizer_carry_y_ = 0.0f;
     int prev_cmd_dx_ = 0;
     int prev_cmd_dy_ = 0;
+    bool sticky_hold_active_ = false;
     std::chrono::steady_clock::time_point last_update_time_{};
     AimDebugSnapshot last_debug_{};
 };
