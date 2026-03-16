@@ -1,0 +1,7 @@
+path: C:\Users\jiahao\Desktop\JIAHAO\tools\Aimlab_aim\dataset  # dataset root dir
+train: train/images  # train images (relative to 'path') 128 images
+val: valid/images  # val images (relative to 'path') 128 images
+test: test/images # test images (optional)
+
+nc: 4
+names: ['CT', 'CT_HEAD', 'T', 'T_HEAD']
