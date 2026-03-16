@@ -106,7 +106,10 @@ public:
     {
         IDXGIResource* desktop_resource = nullptr;
         DXGI_OUTDUPL_FRAME_INFO frame_info = {};
-        HRESULT hr = pDuplicator->AcquireNextFrame(16, &frame_info, &desktop_resource);
+        HRESULT hr = pDuplicator->AcquireNextFrame(
+            static_cast<UINT>(aim::config::kDxgiAcquireTimeoutMs),
+            &frame_info,
+            &desktop_resource);
 
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
             return false;

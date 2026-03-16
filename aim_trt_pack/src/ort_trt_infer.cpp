@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include <filesystem>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -38,14 +39,28 @@ bool OrtTrtInfer::Initialize(const std::string& model_path)
 {
     try
     {
+        if (config::kEnableVerboseLog)
+        {
+            std::cout << "[初始化] ORT 开始初始化, 模型=" << model_path << "\n";
+        }
+
         session_options_.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
         session_options_.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
 
         if (!AppendTensorRtProvider())
         {
+            if (config::kEnableVerboseLog)
+            {
+                std::cout << "[初始化] 挂载 TensorRT Provider 失败。\n";
+            }
             return false;
         }
         backend_name_ = "TensorRT";
+
+        if (config::kEnableVerboseLog)
+        {
+            std::cout << "[初始化] 正在创建 ORT Session（首次会构建 TRT 引擎，耗时会较长）...\n";
+        }
 
         const std::wstring model_path_w = ToWideString(model_path);
         session_ = std::make_unique<Ort::Session>(env_, model_path_w.c_str(), session_options_);
@@ -76,10 +91,21 @@ bool OrtTrtInfer::Initialize(const std::string& model_path)
             output_name_ptrs_.push_back(output_names_.back().c_str());
         }
 
+        if (config::kEnableVerboseLog)
+        {
+            std::cout << "[初始化] Session 就绪。输入数=" << input_count
+                      << ", 输出数=" << output_count
+                      << ", TRT缓存目录=" << trt_cache_dir_ << "\n";
+        }
+
         return !input_name_ptrs_.empty() && !output_name_ptrs_.empty();
     }
-    catch (const Ort::Exception&)
+    catch (const Ort::Exception& ex)
     {
+        if (config::kEnableVerboseLog)
+        {
+            std::cerr << "[初始化] ORT 异常: " << ex.what() << "\n";
+        }
         return false;
     }
 }
@@ -152,7 +178,11 @@ bool OrtTrtInfer::AppendTensorRtProvider()
     OrtStatus* status = api.CreateTensorRTProviderOptions(&trt_options);
     if (status != nullptr || trt_options == nullptr)
     {
-        OrtStatusToString(status);
+        const std::string err = OrtStatusToString(status);
+        if (config::kEnableVerboseLog)
+        {
+            std::cerr << "[初始化] CreateTensorRTProviderOptions 失败: " << err << "\n";
+        }
         return false;
     }
 
@@ -193,7 +223,11 @@ bool OrtTrtInfer::AppendTensorRtProvider()
     if (status != nullptr)
     {
         api.ReleaseTensorRTProviderOptions(trt_options);
-        OrtStatusToString(status);
+        const std::string err = OrtStatusToString(status);
+        if (config::kEnableVerboseLog)
+        {
+            std::cerr << "[初始化] UpdateTensorRTProviderOptions 失败: " << err << "\n";
+        }
         return false;
     }
 
@@ -201,7 +235,11 @@ bool OrtTrtInfer::AppendTensorRtProvider()
     api.ReleaseTensorRTProviderOptions(trt_options);
     if (status != nullptr)
     {
-        OrtStatusToString(status);
+        const std::string err = OrtStatusToString(status);
+        if (config::kEnableVerboseLog)
+        {
+            std::cerr << "[初始化] 挂载 TensorRT 执行器失败: " << err << "\n";
+        }
         return false;
     }
 

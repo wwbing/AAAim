@@ -15,6 +15,7 @@ public:
         float capture_offset_y,
         float screen_center_x,
         float screen_center_y,
+        int target_class_id,
         TargetPoint& target) const;
 
 private:
@@ -26,4 +27,3 @@ private:
 };
 
 } // namespace aim
-

@@ -177,6 +177,7 @@ bool YoloDecoder::SelectNearestTarget(
     float capture_offset_y,
     float screen_center_x,
     float screen_center_y,
+    int target_class_id,
     TargetPoint& target) const
 {
     target = {};
@@ -189,6 +190,11 @@ bool YoloDecoder::SelectNearestTarget(
 
     for (const auto& det : detections)
     {
+        if (target_class_id >= 0 && static_cast<int>(det[5]) != target_class_id)
+        {
+            continue;
+        }
+
         const float local_cx = (det[0] + det[2]) * 0.5f;
         const float local_cy = (det[1] + det[3]) * 0.5f;
         const float global_x = local_cx + capture_offset_x;
@@ -258,4 +264,3 @@ void YoloDecoder::ApplyNms(Detections& detections) const
 }
 
 } // namespace aim
-

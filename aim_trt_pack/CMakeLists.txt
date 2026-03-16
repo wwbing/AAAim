@@ -29,6 +29,10 @@ add_executable(aim_stable
     src/aim_control.cpp
 )
 
+if(MSVC)
+    target_compile_options(aim_stable PRIVATE /utf-8)
+endif()
+
 target_include_directories(aim_stable PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${OpenCV_INCLUDE_DIRS}
@@ -48,8 +52,8 @@ if(WIN32)
 
     add_custom_command(TARGET aim_stable POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/models/best-sim.onnx"
-            "$<TARGET_FILE_DIR:aim_stable>/best-sim.onnx"
+            "${CMAKE_CURRENT_SOURCE_DIR}/models/CS2_1_CLS_Sim.onnx"
+            "$<TARGET_FILE_DIR:aim_stable>/CS2_1_CLS_Sim.onnx"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/runtime/ddll64.dll"
             "$<TARGET_FILE_DIR:aim_stable>/ddll64.dll"
