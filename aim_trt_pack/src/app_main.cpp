@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <chrono>
 #include <clocale>
+#include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -197,6 +199,234 @@ void DrawPreview(cv::Mat& frame, const aim::Detections& detections, bool aim_ena
     }
 }
 
+struct CandidateTarget {
+    float global_x = 0.0f;
+    float global_y = 0.0f;
+    float dist2_center = 0.0f;
+};
+
+class StableTargetSelector {
+public:
+    void Reset()
+    {
+        has_lock_ = false;
+        lock_x_ = 0.0f;
+        lock_y_ = 0.0f;
+        lock_lost_frames_ = 0;
+        has_pending_ = false;
+        pending_x_ = 0.0f;
+        pending_y_ = 0.0f;
+        pending_hits_ = 0;
+    }
+
+    bool Select(
+        const aim::Detections& detections,
+        float capture_offset_x,
+        float capture_offset_y,
+        float screen_center_x,
+        float screen_center_y,
+        int target_class_id,
+        aim::TargetPoint& target)
+    {
+        target = {};
+
+        std::vector<CandidateTarget> candidates;
+        candidates.reserve(detections.size());
+        for (const auto& det : detections)
+        {
+            if (target_class_id >= 0 && static_cast<int>(det[5]) != target_class_id)
+            {
+                continue;
+            }
+
+            const float w = std::max(0.0f, det[2] - det[0]);
+            const float h = std::max(0.0f, det[3] - det[1]);
+            if (w < aim::config::kMinTargetBoxWidthPx || h < aim::config::kMinTargetBoxHeightPx)
+            {
+                continue;
+            }
+            if (w > aim::config::kMaxTargetBoxWidthPx || h > aim::config::kMaxTargetBoxHeightPx)
+            {
+                continue;
+            }
+
+            const float aspect = h / std::max(w, 1e-3f);
+            if (aspect < aim::config::kTargetMinAspectRatio || aspect > aim::config::kTargetMaxAspectRatio)
+            {
+                continue;
+            }
+
+            const float local_cx = (det[0] + det[2]) * 0.5f;
+            const float local_cy = (det[1] + det[3]) * 0.5f;
+            const float global_x = local_cx + capture_offset_x;
+            const float global_y = local_cy + capture_offset_y;
+            const float dx_center = global_x - screen_center_x;
+            const float dy_center = global_y - screen_center_y;
+
+            candidates.push_back({ global_x, global_y, dx_center * dx_center + dy_center * dy_center });
+        }
+
+        if (candidates.empty())
+        {
+            HandleMiss();
+            return false;
+        }
+
+        CandidateTarget chosen = {};
+        if (has_lock_)
+        {
+            if (FindNearestToPoint(candidates, lock_x_, lock_y_, aim::config::kTargetTrackGatePx, chosen))
+            {
+                const float keep = std::clamp(aim::config::kTargetTrackSmoothing, 0.0f, 0.98f);
+                const float update = 1.0f - keep;
+                lock_x_ = lock_x_ * keep + chosen.global_x * update;
+                lock_y_ = lock_y_ * keep + chosen.global_y * update;
+                lock_lost_frames_ = 0;
+                FillTarget(screen_center_x, screen_center_y, lock_x_, lock_y_, target);
+                return true;
+            }
+
+            HandleMiss();
+            return false;
+        }
+
+        if (!FindNearestToCenter(candidates, chosen))
+        {
+            return false;
+        }
+
+        if (has_pending_)
+        {
+            const float dx = chosen.global_x - pending_x_;
+            const float dy = chosen.global_y - pending_y_;
+            const float dist = std::sqrt(dx * dx + dy * dy);
+            if (dist <= aim::config::kTargetAcquireGatePx)
+            {
+                pending_x_ = pending_x_ * 0.6f + chosen.global_x * 0.4f;
+                pending_y_ = pending_y_ * 0.6f + chosen.global_y * 0.4f;
+                ++pending_hits_;
+            }
+            else
+            {
+                pending_x_ = chosen.global_x;
+                pending_y_ = chosen.global_y;
+                pending_hits_ = 1;
+            }
+        }
+        else
+        {
+            has_pending_ = true;
+            pending_x_ = chosen.global_x;
+            pending_y_ = chosen.global_y;
+            pending_hits_ = 1;
+        }
+
+        if (pending_hits_ >= std::max(1, aim::config::kTargetAcquireConfirmFrames))
+        {
+            has_lock_ = true;
+            lock_x_ = pending_x_;
+            lock_y_ = pending_y_;
+            lock_lost_frames_ = 0;
+            has_pending_ = false;
+            pending_hits_ = 0;
+            FillTarget(screen_center_x, screen_center_y, lock_x_, lock_y_, target);
+            return true;
+        }
+
+        return false;
+    }
+
+private:
+    static void FillTarget(
+        float screen_center_x,
+        float screen_center_y,
+        float target_x,
+        float target_y,
+        aim::TargetPoint& out)
+    {
+        const float dx = target_x - screen_center_x;
+        const float dy = target_y - screen_center_y;
+        out.x = target_x;
+        out.y = target_y;
+        out.distance = std::sqrt(dx * dx + dy * dy);
+        out.valid = true;
+    }
+
+    static bool FindNearestToCenter(const std::vector<CandidateTarget>& candidates, CandidateTarget& out)
+    {
+        if (candidates.empty())
+        {
+            return false;
+        }
+
+        float best_dist2 = std::numeric_limits<float>::max();
+        for (const auto& c : candidates)
+        {
+            if (c.dist2_center < best_dist2)
+            {
+                best_dist2 = c.dist2_center;
+                out = c;
+            }
+        }
+        return best_dist2 < std::numeric_limits<float>::max();
+    }
+
+    static bool FindNearestToPoint(
+        const std::vector<CandidateTarget>& candidates,
+        float ref_x,
+        float ref_y,
+        float gate_px,
+        CandidateTarget& out)
+    {
+        const float gate2 = gate_px * gate_px;
+        float best_dist2 = std::numeric_limits<float>::max();
+
+        for (const auto& c : candidates)
+        {
+            const float dx = c.global_x - ref_x;
+            const float dy = c.global_y - ref_y;
+            const float dist2 = dx * dx + dy * dy;
+            if (dist2 > gate2)
+            {
+                continue;
+            }
+            if (dist2 < best_dist2)
+            {
+                best_dist2 = dist2;
+                out = c;
+            }
+        }
+
+        return best_dist2 < std::numeric_limits<float>::max();
+    }
+
+    void HandleMiss()
+    {
+        if (has_lock_)
+        {
+            ++lock_lost_frames_;
+            if (lock_lost_frames_ > std::max(0, aim::config::kTargetLostToleranceFrames))
+            {
+                has_lock_ = false;
+                lock_lost_frames_ = 0;
+            }
+        }
+        has_pending_ = false;
+        pending_hits_ = 0;
+    }
+
+private:
+    bool has_lock_ = false;
+    float lock_x_ = 0.0f;
+    float lock_y_ = 0.0f;
+    int lock_lost_frames_ = 0;
+
+    bool has_pending_ = false;
+    float pending_x_ = 0.0f;
+    float pending_y_ = 0.0f;
+    int pending_hits_ = 0;
+};
+
 } // namespace
 
 int main()
@@ -243,6 +473,7 @@ int main()
         aim::config::kAimMaxStepPx,
         aim::config::kAimDeadzonePx,
         aim::config::kCursorLockCenterThresholdPx);
+    StableTargetSelector target_selector;
 
     bool aim_enabled = false;
     bool preview_enabled = aim::config::kShowPreviewWindow;
@@ -344,7 +575,7 @@ int main()
                     const float screen_center_y = static_cast<float>(screen_height) * 0.5f;
 
                     aim::TargetPoint target;
-                    if (decoder.SelectNearestTarget(
+                    if (target_selector.Select(
                             detections,
                             capture_offset_x,
                             capture_offset_y,
@@ -357,6 +588,10 @@ int main()
                         target.y = std::clamp(target.y, 0.0f, static_cast<float>(screen_height - 1));
                         aim_control.MoveToTarget(mouse, target.x, target.y, screen_width, screen_height);
                         target_locked = true;
+                    }
+                    else
+                    {
+                        aim_control.Reset();
                     }
                 }
 
@@ -394,11 +629,15 @@ int main()
         if (KeyPressedEdge(aim::config::kHotkeyEnableAim, prev_q))
         {
             aim_enabled = true;
+            target_selector.Reset();
+            aim_control.Reset();
             std::cout << "[热键] 自瞄已开启\n";
         }
         if (KeyPressedEdge(aim::config::kHotkeyDisableAim, prev_k))
         {
             aim_enabled = false;
+            target_selector.Reset();
+            aim_control.Reset();
             std::cout << "[热键] 自瞄已关闭\n";
         }
         if (KeyPressedEdge(aim::config::kHotkeyTogglePreview, prev_v))

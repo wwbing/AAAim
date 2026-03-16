@@ -3,6 +3,18 @@
 namespace aim {
 namespace config {
 
+enum class AimAlgorithm {
+    Proportional = 0,
+    PID = 1,
+    Bezier = 2,
+};
+
+enum class AimMoveMode {
+    Auto = 0,
+    Relative = 1,
+    Absolute = 2,
+};
+
 // Capture
 inline constexpr int kCaptureSize = 640;
 inline constexpr bool kShowPreviewWindow = false;
@@ -15,14 +27,37 @@ inline constexpr bool kEnableVerboseLog = true;
 inline constexpr int kVerboseLogIntervalMs = 1000;
 
 // Detection
-inline constexpr float kConfThreshold = 0.7f;
-inline constexpr float kNmsIouThreshold = 0.6f;
+inline constexpr float kConfThreshold = 0.75f;
+inline constexpr float kNmsIouThreshold = 0.45f;
+inline constexpr float kMinTargetBoxWidthPx = 12.0f;
+inline constexpr float kMinTargetBoxHeightPx = 12.0f;
+inline constexpr float kMaxTargetBoxWidthPx = 320.0f;
+inline constexpr float kMaxTargetBoxHeightPx = 320.0f;
+inline constexpr float kTargetMinAspectRatio = 0.5f;  // h/w
+inline constexpr float kTargetMaxAspectRatio = 2.4f;  // h/w
+inline constexpr float kTargetAcquireGatePx = 72.0f;
+inline constexpr float kTargetTrackGatePx = 110.0f;
+inline constexpr int kTargetAcquireConfirmFrames = 3;
+inline constexpr int kTargetLostToleranceFrames = 5;
+inline constexpr float kTargetTrackSmoothing = 0.8f; // Larger is more stable, less responsive.
 
 // Aim control
-inline constexpr float kAimSmoothFactor = 0.55f;
-inline constexpr float kAimMaxStepPx = 300.0f;
-inline constexpr float kAimDeadzonePx = 1.0f;
+inline constexpr AimAlgorithm kAimAlgorithm = AimAlgorithm::Bezier;
+inline constexpr AimMoveMode kAimMoveMode = AimMoveMode::Relative;
+inline constexpr float kAimSmoothFactor = 0.32f;
+inline constexpr float kAimMaxStepPx = 180.0f;
+inline constexpr float kAimDeadzonePx = 2.2f;
 inline constexpr float kCursorLockCenterThresholdPx = 3.0f;
+inline constexpr float kAimPidKi = 0.0f;
+inline constexpr float kAimPidKd = 0.015f;
+inline constexpr float kAimPidDerivativeAlpha = 0.88f;
+inline constexpr float kAimPidIntegralLimit = 240.0f;
+inline constexpr float kAimBezierStrength = 0.45f;
+inline constexpr float kAimBezierDistancePx = 220.0f;
+inline constexpr float kAimNearZonePx = 16.0f;
+inline constexpr float kAimNearZoneMinGain = 0.18f;
+inline constexpr float kAimOutputLpfAlpha = 0.82f;
+inline constexpr float kAimRelativeMinStepErrorPx = 8.0f;
 
 // Hotkeys
 inline constexpr int kHotkeyEnableAim = 'Q';
