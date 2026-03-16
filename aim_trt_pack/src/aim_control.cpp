@@ -33,7 +33,10 @@ void AimControl::Reset()
     derivative_y_ = 0.0f;
     filtered_move_x_ = 0.0f;
     filtered_move_y_ = 0.0f;
+    prev_cmd_dx_ = 0;
+    prev_cmd_dy_ = 0;
     last_update_time_ = std::chrono::steady_clock::time_point{};
+    last_debug_ = {};
 }
 
 void AimControl::MoveToTarget(
@@ -44,6 +47,11 @@ void AimControl::MoveToTarget(
     int screen_height)
 {
     using Clock = std::chrono::steady_clock;
+
+    last_debug_ = {};
+    last_debug_.valid = true;
+    last_debug_.target_x = target_x;
+    last_debug_.target_y = target_y;
 
     const float screen_center_x = static_cast<float>(screen_width) * 0.5f;
     const float screen_center_y = static_cast<float>(screen_height) * 0.5f;
@@ -88,9 +96,16 @@ void AimControl::MoveToTarget(
         }
     }
 
+    last_debug_.use_relative_mode = use_relative_mode;
+    last_debug_.source_x = source_x;
+    last_debug_.source_y = source_y;
+
     float dx = target_x - source_x;
     float dy = target_y - source_y;
     const float dist2 = dx * dx + dy * dy;
+    last_debug_.error_x = dx;
+    last_debug_.error_y = dy;
+    last_debug_.error_dist = std::sqrt(dist2);
     if (dist2 <= deadzone_px_ * deadzone_px_)
     {
         // Decay controller memory near center to avoid oscillation.
@@ -98,6 +113,11 @@ void AimControl::MoveToTarget(
         integral_y_ *= 0.7f;
         filtered_move_x_ *= 0.5f;
         filtered_move_y_ *= 0.5f;
+        prev_cmd_dx_ = 0;
+        prev_cmd_dy_ = 0;
+        last_debug_.in_deadzone = true;
+        last_debug_.move_filtered_x = filtered_move_x_;
+        last_debug_.move_filtered_y = filtered_move_y_;
         return;
     }
 
@@ -148,6 +168,7 @@ void AimControl::MoveToTarget(
             pid_initialized_ = true;
         }
         last_update_time_ = now;
+        last_debug_.dt_seconds = dt;
 
         integral_x_ += dx * dt;
         integral_y_ += dy * dt;
@@ -168,6 +189,9 @@ void AimControl::MoveToTarget(
         move_dy = smooth_factor_ * dy + pid_ki_ * integral_y_ + pid_kd_ * derivative_y_;
     }
 
+    last_debug_.move_raw_x = move_dx;
+    last_debug_.move_raw_y = move_dy;
+
     // Additional damping near center to suppress jitter.
     const float dist = std::sqrt(dist2);
     if (dist < near_zone_px_)
@@ -178,16 +202,54 @@ void AimControl::MoveToTarget(
         move_dx *= gain;
         move_dy *= gain;
     }
+    last_debug_.move_post_gain_x = move_dx;
+    last_debug_.move_post_gain_y = move_dy;
 
     // Low-pass output command to smooth per-frame target noise.
-    const float alpha = std::clamp(output_lpf_alpha_, 0.0f, 0.98f);
+    float alpha = std::clamp(output_lpf_alpha_, 0.0f, 0.98f);
+    if (dist < near_zone_px_)
+    {
+        alpha = std::min(alpha, std::clamp(near_zone_lpf_alpha_, 0.0f, 0.98f));
+    }
     const float beta = 1.0f - alpha;
     filtered_move_x_ = filtered_move_x_ * alpha + move_dx * beta;
     filtered_move_y_ = filtered_move_y_ * alpha + move_dy * beta;
+
+    // If output direction is opposite to current error, quickly decay residual tail.
+    const float sign_flip_damp = std::clamp(sign_flip_damping_, 0.0f, 1.0f);
+    if (filtered_move_x_ * dx < 0.0f)
+    {
+        filtered_move_x_ *= sign_flip_damp;
+    }
+    if (filtered_move_y_ * dy < 0.0f)
+    {
+        filtered_move_y_ *= sign_flip_damp;
+    }
+
     move_dx = filtered_move_x_;
     move_dy = filtered_move_y_;
 
-    const float move_len = std::sqrt(move_dx * move_dx + move_dy * move_dy);
+    // Hard clamp: command cannot exceed current error proportion (anti-overshoot).
+    const float overshoot_ratio = std::clamp(output_overshoot_ratio_, 0.05f, 1.20f);
+    const float max_follow_x = std::fabs(dx) * overshoot_ratio;
+    const float max_follow_y = std::fabs(dy) * overshoot_ratio;
+    move_dx = std::clamp(move_dx, -max_follow_x, max_follow_x);
+    move_dy = std::clamp(move_dy, -max_follow_y, max_follow_y);
+
+    float move_len = std::sqrt(move_dx * move_dx + move_dy * move_dy);
+    if (dist < near_zone_px_)
+    {
+        const float near_cmd_ratio = std::clamp(near_zone_max_cmd_ratio_, 0.05f, 1.0f);
+        const float near_cmd_cap = std::max(1.0f, dist * near_cmd_ratio);
+        if (move_len > near_cmd_cap)
+        {
+            const float scale = near_cmd_cap / std::max(move_len, 1e-3f);
+            move_dx *= scale;
+            move_dy *= scale;
+            move_len = near_cmd_cap;
+        }
+    }
+
     if (move_len > max_step_px_)
     {
         const float scale = max_step_px_ / move_len;
@@ -195,10 +257,46 @@ void AimControl::MoveToTarget(
         move_dy *= scale;
     }
 
+    // Keep internal state consistent with post-clamp output.
+    filtered_move_x_ = move_dx;
+    filtered_move_y_ = move_dy;
+
+    last_debug_.move_filtered_x = move_dx;
+    last_debug_.move_filtered_y = move_dy;
+
     if (use_relative_mode)
     {
         int cmd_dx = static_cast<int>(std::lround(move_dx));
         int cmd_dy = static_cast<int>(std::lround(move_dy));
+
+        if (dist < micro_error_px_)
+        {
+            if (std::fabs(move_dx) < micro_move_deadband_px_)
+            {
+                cmd_dx = 0;
+            }
+            if (std::fabs(move_dy) < micro_move_deadband_px_)
+            {
+                cmd_dy = 0;
+            }
+        }
+
+        if (dist < flip_suppress_error_px_)
+        {
+            const int cmd_limit = std::max(1, flip_suppress_cmd_px_);
+            if (cmd_dx != 0 && prev_cmd_dx_ != 0 &&
+                std::abs(cmd_dx) <= cmd_limit && std::abs(prev_cmd_dx_) <= cmd_limit &&
+                ((cmd_dx > 0) != (prev_cmd_dx_ > 0)))
+            {
+                cmd_dx = 0;
+            }
+            if (cmd_dy != 0 && prev_cmd_dy_ != 0 &&
+                std::abs(cmd_dy) <= cmd_limit && std::abs(prev_cmd_dy_) <= cmd_limit &&
+                ((cmd_dy > 0) != (prev_cmd_dy_ > 0)))
+            {
+                cmd_dy = 0;
+            }
+        }
 
         if (cmd_dx == 0 && std::fabs(dx) > relative_min_step_error_px_ && std::fabs(move_dx) > 0.2f)
         {
@@ -209,15 +307,25 @@ void AimControl::MoveToTarget(
             cmd_dy = (dy > 0.0f) ? 1 : -1;
         }
 
+        last_debug_.cmd_dx = cmd_dx;
+        last_debug_.cmd_dy = cmd_dy;
+
         if (cmd_dx != 0 || cmd_dy != 0)
         {
             mouse.MoveRelative(cmd_dx, cmd_dy);
         }
+
+        prev_cmd_dx_ = cmd_dx;
+        prev_cmd_dy_ = cmd_dy;
         return;
     }
 
     const float next_x = std::clamp(source_x + move_dx, 0.0f, static_cast<float>(screen_width - 1));
     const float next_y = std::clamp(source_y + move_dy, 0.0f, static_cast<float>(screen_height - 1));
+    last_debug_.cmd_dx = static_cast<int>(std::lround(next_x - source_x));
+    last_debug_.cmd_dy = static_cast<int>(std::lround(next_y - source_y));
+    prev_cmd_dx_ = last_debug_.cmd_dx;
+    prev_cmd_dy_ = last_debug_.cmd_dy;
     mouse.MoveTo(ToDllCoord(next_x, screen_width), ToDllCoord(next_y, screen_height));
 }
 

@@ -25,6 +25,9 @@ inline constexpr int kDxgiAcquireTimeoutMs = 1;
 inline constexpr bool kUseHighPrecisionTimer = true;
 inline constexpr bool kEnableVerboseLog = true;
 inline constexpr int kVerboseLogIntervalMs = 1000;
+inline constexpr bool kEnableTuningCsvLog = true;
+inline constexpr bool kTuningCsvLogOnlyAimEnabled = true;
+inline constexpr int kTuningCsvFlushIntervalFrames = 60;
 
 // Detection
 inline constexpr float kConfThreshold = 0.75f;
@@ -39,12 +42,12 @@ inline constexpr float kTargetAcquireGatePx = 72.0f;
 inline constexpr float kTargetTrackGatePx = 110.0f;
 inline constexpr int kTargetAcquireConfirmFrames = 3;
 inline constexpr int kTargetLostToleranceFrames = 5;
-inline constexpr float kTargetTrackSmoothing = 0.8f; // Larger is more stable, less responsive.
+inline constexpr float kTargetTrackSmoothing = 0.88f; // Larger is more stable, less responsive.
 
 // Aim control
 inline constexpr AimAlgorithm kAimAlgorithm = AimAlgorithm::Bezier;
 inline constexpr AimMoveMode kAimMoveMode = AimMoveMode::Relative;
-inline constexpr float kAimSmoothFactor = 0.32f;
+inline constexpr float kAimSmoothFactor = 0.26f;
 inline constexpr float kAimMaxStepPx = 180.0f;
 inline constexpr float kAimDeadzonePx = 2.2f;
 inline constexpr float kCursorLockCenterThresholdPx = 3.0f;
@@ -52,12 +55,20 @@ inline constexpr float kAimPidKi = 0.0f;
 inline constexpr float kAimPidKd = 0.015f;
 inline constexpr float kAimPidDerivativeAlpha = 0.88f;
 inline constexpr float kAimPidIntegralLimit = 240.0f;
-inline constexpr float kAimBezierStrength = 0.45f;
+inline constexpr float kAimBezierStrength = 0.16f;
 inline constexpr float kAimBezierDistancePx = 220.0f;
-inline constexpr float kAimNearZonePx = 16.0f;
-inline constexpr float kAimNearZoneMinGain = 0.18f;
-inline constexpr float kAimOutputLpfAlpha = 0.82f;
-inline constexpr float kAimRelativeMinStepErrorPx = 8.0f;
+inline constexpr float kAimNearZonePx = 18.0f;
+inline constexpr float kAimNearZoneMinGain = 0.12f;
+inline constexpr float kAimOutputLpfAlpha = 0.70f;
+inline constexpr float kAimRelativeMinStepErrorPx = 12.0f;
+inline constexpr float kAimNearZoneLpfAlpha = 0.30f;
+inline constexpr float kAimSignFlipDamping = 0.08f;
+inline constexpr float kAimOutputOvershootRatio = 0.60f;
+inline constexpr float kAimNearZoneMaxCmdRatio = 0.42f;
+inline constexpr float kAimMicroErrorPx = 7.0f;
+inline constexpr float kAimMicroMoveDeadbandPx = 1.6f;
+inline constexpr float kAimFlipSuppressErrorPx = 14.0f;
+inline constexpr int kAimFlipSuppressCmdPx = 3;
 
 // Hotkeys
 inline constexpr int kHotkeyEnableAim = 'Q';

@@ -6,6 +6,8 @@
 #include <chrono>
 #include <clocale>
 #include <cmath>
+#include <cstdio>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -62,6 +64,34 @@ std::string DirnameOf(const std::string& path)
         return ".";
     }
     return path.substr(0, pos);
+}
+
+std::string BuildTuningCsvPath()
+{
+    SYSTEMTIME st = {};
+    GetLocalTime(&st);
+    char filename[128] = { 0 };
+    std::snprintf(
+        filename,
+        sizeof(filename),
+        "logs\\aim_debug_%04d%02d%02d_%02d%02d%02d.csv",
+        st.wYear,
+        st.wMonth,
+        st.wDay,
+        st.wHour,
+        st.wMinute,
+        st.wSecond);
+    return std::string(filename);
+}
+
+bool EnsureLogsDirectory()
+{
+    if (CreateDirectoryA("logs", nullptr) != 0)
+    {
+        return true;
+    }
+    const DWORD err = GetLastError();
+    return err == ERROR_ALREADY_EXISTS;
 }
 
 std::string ResolveModelPath()
@@ -485,7 +515,36 @@ int main()
     std::cout << "默认目标: " << TargetClassName(target_head_class_id) << "\n";
     std::cout << "默认可视化: " << (preview_enabled ? "开" : "关") << "\n";
 
+    std::ofstream tuning_csv;
+    std::string tuning_csv_path;
+    int tuning_csv_pending_flush = 0;
+    if (aim::config::kEnableTuningCsvLog)
+    {
+        if (EnsureLogsDirectory())
+        {
+            tuning_csv_path = BuildTuningCsvPath();
+            tuning_csv.open(tuning_csv_path, std::ios::out | std::ios::trunc);
+            if (tuning_csv.is_open())
+            {
+                tuning_csv << "t_ms,frame,aim,preview,cap_ok,infer_ok,det_count,target_locked,target_dist_px,"
+                              "target_x,target_y,error_x,error_y,error_dist,move_raw_x,move_raw_y,"
+                              "move_post_gain_x,move_post_gain_y,move_filtered_x,move_filtered_y,"
+                              "cmd_dx,cmd_dy,use_relative,deadzone,dt_s,cap_ms,infer_ms,decode_ms,total_ms\n";
+                std::cout << "调参日志: " << tuning_csv_path << "\n";
+            }
+            else
+            {
+                std::cerr << "调参日志创建失败: " << tuning_csv_path << "\n";
+            }
+        }
+        else
+        {
+            std::cerr << "调参日志目录创建失败: logs\n";
+        }
+    }
+
     using Clock = std::chrono::steady_clock;
+    const auto app_start_time = Clock::now();
     auto stats_window_start = Clock::now();
     int stats_frames = 0;
     int stats_capture_ok = 0;
@@ -513,9 +572,11 @@ int main()
 
     auto next_capture_tick = Clock::now();
     bool pace_started = false;
+    long long frame_index = 0;
 
     while (true)
     {
+        ++frame_index;
         if (aim::config::kLimitCaptureRate)
         {
             if (!pace_started)
@@ -541,6 +602,8 @@ int main()
         bool capture_ok = false;
         bool infer_ok = false;
         bool target_locked = false;
+        bool has_target_for_log = false;
+        aim::TargetPoint selected_target;
 
         cv::Mat frame;
         aim::Detections detections;
@@ -586,6 +649,8 @@ int main()
                     {
                         target.x = std::clamp(target.x, 0.0f, static_cast<float>(screen_width - 1));
                         target.y = std::clamp(target.y, 0.0f, static_cast<float>(screen_height - 1));
+                        selected_target = target;
+                        has_target_for_log = true;
                         aim_control.MoveToTarget(mouse, target.x, target.y, screen_width, screen_height);
                         target_locked = true;
                     }
@@ -655,6 +720,61 @@ int main()
             break;
         }
 
+        if (tuning_csv.is_open())
+        {
+            const bool only_aim = aim::config::kTuningCsvLogOnlyAimEnabled;
+            if (!only_aim || aim_enabled)
+            {
+                aim::AimDebugSnapshot dbg = {};
+                if (target_locked)
+                {
+                    dbg = aim_control.LastDebug();
+                }
+                const double total_ms = capture_ms + infer_ms + decode_ms;
+                const double t_ms =
+                    std::chrono::duration<double, std::milli>(Clock::now() - app_start_time).count();
+
+                tuning_csv << std::fixed << std::setprecision(3)
+                           << t_ms << ","
+                           << frame_index << ","
+                           << (aim_enabled ? 1 : 0) << ","
+                           << (preview_enabled ? 1 : 0) << ","
+                           << (capture_ok ? 1 : 0) << ","
+                           << (infer_ok ? 1 : 0) << ","
+                           << detections.size() << ","
+                           << (target_locked ? 1 : 0) << ","
+                           << (has_target_for_log ? selected_target.distance : 0.0f) << ","
+                           << (has_target_for_log ? selected_target.x : 0.0f) << ","
+                           << (has_target_for_log ? selected_target.y : 0.0f) << ","
+                           << dbg.error_x << ","
+                           << dbg.error_y << ","
+                           << dbg.error_dist << ","
+                           << dbg.move_raw_x << ","
+                           << dbg.move_raw_y << ","
+                           << dbg.move_post_gain_x << ","
+                           << dbg.move_post_gain_y << ","
+                           << dbg.move_filtered_x << ","
+                           << dbg.move_filtered_y << ","
+                           << dbg.cmd_dx << ","
+                           << dbg.cmd_dy << ","
+                           << (dbg.use_relative_mode ? 1 : 0) << ","
+                           << (dbg.in_deadzone ? 1 : 0) << ","
+                           << dbg.dt_seconds << ","
+                           << capture_ms << ","
+                           << infer_ms << ","
+                           << decode_ms << ","
+                           << total_ms
+                           << "\n";
+
+                ++tuning_csv_pending_flush;
+                if (tuning_csv_pending_flush >= std::max(1, aim::config::kTuningCsvFlushIntervalFrames))
+                {
+                    tuning_csv.flush();
+                    tuning_csv_pending_flush = 0;
+                }
+            }
+        }
+
         if (aim::config::kEnableVerboseLog)
         {
             const auto now = Clock::now();
@@ -706,6 +826,12 @@ int main()
     if (high_precision_timer_set)
     {
         timeEndPeriod(1);
+    }
+
+    if (tuning_csv.is_open())
+    {
+        tuning_csv.flush();
+        tuning_csv.close();
     }
 
     return 0;
