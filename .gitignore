@@ -1,0 +1,61 @@
+# ------------------------------
+# Local data and experiment outputs
+# ------------------------------
+dataset/
+yolov5-6.0/data/data_org/
+yolov5-6.0/runs/
+yolov5-6.0/reference_project/
+
+# ------------------------------
+# Python
+# ------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# ------------------------------
+# C++ / CMake / MSVC / MinGW build artifacts
+# ------------------------------
+aim_trt_pack/build*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/Makefile
+*.obj
+*.o
+*.a
+*.exp
+*.ilk
+
+# ------------------------------
+# Runtime cache / logs
+# ------------------------------
+trt_cache/
+*.log
+LOG.txt
+
+# ------------------------------
+# IDE / OS
+# ------------------------------
+.vscode/
+.idea/
+*.user
+*.suo
+*.VC.db
+*.opendb
+*.sln.docstates
+Thumbs.db
+Desktop.ini
+
+
+# ONNX Runtime third_party: keep include, ignore package zip and other extracted files.
+aim_trt_pack/third_party/onnxruntime-win-x64-gpu-1.23.2/*
+!aim_trt_pack/third_party/onnxruntime-win-x64-gpu-1.23.2/include/
+!aim_trt_pack/third_party/onnxruntime-win-x64-gpu-1.23.2/include/**
+aim_trt_pack/third_party/onnxruntime-win-x64-gpu-1.23.2/lib/
+aim_trt_pack/third_party/onnxruntime-win-x64-gpu-1.23.2/lib/**
