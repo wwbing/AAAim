@@ -180,6 +180,11 @@ void PreciseSleepUntil(const std::chrono::time_point<ClockT>& target_time)
 
 void DrawPreview(cv::Mat& frame, const aim::Detections& detections, bool aim_enabled, int target_class_id)
 {
+    const int cx = frame.cols / 2;
+    const int cy = frame.rows / 2;
+    const int radius = static_cast<int>(std::lround(std::max(1.0f, aim::config::kAimActiveCircleRadiusPx)));
+    cv::circle(frame, cv::Point(cx, cy), radius, cv::Scalar(0, 255, 255), 1);
+
     for (const auto& det : detections)
     {
         const cv::Point p1(static_cast<int>(det[0]), static_cast<int>(det[1]));
@@ -260,28 +265,14 @@ public:
     {
         target = {};
 
+        const float active_radius = std::max(1.0f, aim::config::kAimActiveCircleRadiusPx);
+        const float active_radius2 = active_radius * active_radius;
+
         std::vector<CandidateTarget> candidates;
         candidates.reserve(detections.size());
         for (const auto& det : detections)
         {
             if (target_class_id >= 0 && static_cast<int>(det[5]) != target_class_id)
-            {
-                continue;
-            }
-
-            const float w = std::max(0.0f, det[2] - det[0]);
-            const float h = std::max(0.0f, det[3] - det[1]);
-            if (w < aim::config::kMinTargetBoxWidthPx || h < aim::config::kMinTargetBoxHeightPx)
-            {
-                continue;
-            }
-            if (w > aim::config::kMaxTargetBoxWidthPx || h > aim::config::kMaxTargetBoxHeightPx)
-            {
-                continue;
-            }
-
-            const float aspect = h / std::max(w, 1e-3f);
-            if (aspect < aim::config::kTargetMinAspectRatio || aspect > aim::config::kTargetMaxAspectRatio)
             {
                 continue;
             }
@@ -292,8 +283,15 @@ public:
             const float global_y = local_cy + capture_offset_y;
             const float dx_center = global_x - screen_center_x;
             const float dy_center = global_y - screen_center_y;
+            const float dist2_center = dx_center * dx_center + dy_center * dy_center;
 
-            candidates.push_back({ global_x, global_y, dx_center * dx_center + dy_center * dy_center });
+            // Hard filter: only keep targets inside center active circle.
+            if (dist2_center > active_radius2)
+            {
+                continue;
+            }
+
+            candidates.push_back({ global_x, global_y, dist2_center });
         }
 
         if (candidates.empty())
@@ -496,6 +494,9 @@ int main()
     {
         return 1;
     }
+    std::cout << "移动算法: DirectRelative, 移动方式: "
+              << (mouse.SupportsRelativeMove() ? "Relative(相对移动)" : "Absolute(绝对移动)")
+              << "\n";
 
     aim::YoloDecoder decoder(aim::config::kConfThreshold, aim::config::kNmsIouThreshold);
     aim::AimControl aim_control(
@@ -651,8 +652,23 @@ int main()
                         target.y = std::clamp(target.y, 0.0f, static_cast<float>(screen_height - 1));
                         selected_target = target;
                         has_target_for_log = true;
-                        aim_control.MoveToTarget(mouse, target.x, target.y, screen_width, screen_height);
-                        target_locked = true;
+
+                        const float dx_center = target.x - screen_center_x;
+                        const float dy_center = target.y - screen_center_y;
+                        const float active_radius = std::max(1.0f, aim::config::kAimActiveCircleRadiusPx);
+                        const bool in_active_circle =
+                            (dx_center * dx_center + dy_center * dy_center) <= (active_radius * active_radius);
+
+                        if (in_active_circle)
+                        {
+                            aim_control.MoveToTarget(mouse, target.x, target.y, screen_width, screen_height);
+                            target_locked = true;
+                        }
+                        else
+                        {
+                            // Outside center-lock circle: do not move to keep behavior more natural.
+                            aim_control.Reset();
+                        }
                     }
                     else
                     {

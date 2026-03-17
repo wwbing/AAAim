@@ -111,6 +111,65 @@ void AimControl::MoveToTarget(
     const float dist = std::sqrt(dist2);
     last_debug_.error_dist = dist;
 
+    // Legacy aggressive mode: direct relative push, bypass PID/Bezier and all extra smoothing.
+    if (algorithm_ == config::AimAlgorithm::DirectRelative)
+    {
+        if (dist2 <= deadzone_px_ * deadzone_px_)
+        {
+            last_debug_.in_deadzone = true;
+            return;
+        }
+
+        float move_dx = dx * smooth_factor_;
+        float move_dy = dy * smooth_factor_;
+        float move_len = std::sqrt(move_dx * move_dx + move_dy * move_dy);
+        if (move_len > max_step_px_)
+        {
+            const float scale = max_step_px_ / std::max(move_len, 1e-3f);
+            move_dx *= scale;
+            move_dy *= scale;
+            move_len = max_step_px_;
+        }
+
+        last_debug_.move_raw_x = move_dx;
+        last_debug_.move_raw_y = move_dy;
+        last_debug_.move_post_gain_x = move_dx;
+        last_debug_.move_post_gain_y = move_dy;
+        last_debug_.move_filtered_x = move_dx;
+        last_debug_.move_filtered_y = move_dy;
+
+        if (use_relative_mode)
+        {
+            int cmd_dx = static_cast<int>(std::lround(move_dx));
+            int cmd_dy = static_cast<int>(std::lround(move_dy));
+
+            if (cmd_dx == 0 && std::fabs(dx) >= 1.0f)
+            {
+                cmd_dx = (dx > 0.0f) ? 1 : -1;
+            }
+            if (cmd_dy == 0 && std::fabs(dy) >= 1.0f)
+            {
+                cmd_dy = (dy > 0.0f) ? 1 : -1;
+            }
+
+            last_debug_.cmd_dx = cmd_dx;
+            last_debug_.cmd_dy = cmd_dy;
+
+            if (cmd_dx != 0 || cmd_dy != 0)
+            {
+                mouse.MoveRelative(cmd_dx, cmd_dy);
+            }
+            return;
+        }
+
+        const float next_x = std::clamp(source_x + move_dx, 0.0f, static_cast<float>(screen_width - 1));
+        const float next_y = std::clamp(source_y + move_dy, 0.0f, static_cast<float>(screen_height - 1));
+        last_debug_.cmd_dx = static_cast<int>(std::lround(next_x - source_x));
+        last_debug_.cmd_dy = static_cast<int>(std::lround(next_y - source_y));
+        mouse.MoveTo(ToDllCoord(next_x, screen_width), ToDllCoord(next_y, screen_height));
+        return;
+    }
+
     const float sticky_enter = std::max(0.0f, sticky_hold_enter_px_);
     const float sticky_exit = std::max(sticky_enter, sticky_hold_exit_px_);
     if (!sticky_hold_active_ && dist <= sticky_enter)

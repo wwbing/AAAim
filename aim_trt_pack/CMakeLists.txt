@@ -29,8 +29,13 @@ add_executable(aim_stable
     src/aim_control.cpp
 )
 
+add_executable(dll_motion_demo
+    src/dll_motion_demo.cpp
+)
+
 if(MSVC)
     target_compile_options(aim_stable PRIVATE /utf-8)
+    target_compile_options(dll_motion_demo PRIVATE /utf-8)
 endif()
 
 target_include_directories(aim_stable PRIVATE
@@ -43,6 +48,14 @@ target_link_libraries(aim_stable PRIVATE
     ${OpenCV_LIBS}
     ${ONNXRUNTIME_LIB}
 )
+
+target_include_directories(dll_motion_demo PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(WIN32)
+    target_link_libraries(dll_motion_demo PRIVATE user32)
+endif()
 
 if(WIN32)
     target_link_libraries(aim_stable PRIVATE
@@ -60,6 +73,12 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ONNXRUNTIME_ROOT}/lib"
             "$<TARGET_FILE_DIR:aim_stable>"
+    )
+
+    add_custom_command(TARGET dll_motion_demo POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/runtime/ddll64.dll"
+            "$<TARGET_FILE_DIR:dll_motion_demo>/ddll64.dll"
     )
 
     if(EXISTS "${OpenCV_INSTALL_ROOT}/bin")

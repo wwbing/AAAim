@@ -7,6 +7,7 @@ enum class AimAlgorithm {
     Proportional = 0,
     PID = 1,
     Bezier = 2,
+    DirectRelative = 3,
 };
 
 enum class AimMoveMode {
@@ -41,15 +42,16 @@ inline constexpr float kTargetMaxAspectRatio = 2.4f;  // h/w
 inline constexpr float kTargetAcquireGatePx = 72.0f;
 inline constexpr float kTargetTrackGatePx = 180.0f;
 inline constexpr int kTargetAcquireConfirmFrames = 1;
-inline constexpr int kTargetLostToleranceFrames = 12;
-inline constexpr float kTargetTrackSmoothing = 0.92f; // Larger is more stable, less responsive.
+inline constexpr int kTargetLostToleranceFrames = 0;
+inline constexpr float kTargetTrackSmoothing = 0.0f; // 0 means no lock smoothing (more aggressive).
 
 // Aim control
-inline constexpr AimAlgorithm kAimAlgorithm = AimAlgorithm::PID;
+inline constexpr AimAlgorithm kAimAlgorithm = AimAlgorithm::DirectRelative;
 inline constexpr AimMoveMode kAimMoveMode = AimMoveMode::Relative;
-inline constexpr float kAimSmoothFactor = 0.42f;
+inline constexpr float kAimActiveCircleRadiusPx = 100.0f;
+inline constexpr float kAimSmoothFactor = 1.00f;
 inline constexpr float kAimMaxStepPx = 180.0f;
-inline constexpr float kAimDeadzonePx = 2.2f;
+inline constexpr float kAimDeadzonePx = 1.0f;
 inline constexpr float kCursorLockCenterThresholdPx = 3.0f;
 inline constexpr float kAimPidKi = 0.0010f;
 inline constexpr float kAimPidKd = 0.014f;
