@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -29,112 +28,6 @@
 namespace {
 
 constexpr const char* kPreviewWindowName = "Detection";
-
-struct CsvLogState {
-    std::ofstream file;
-    int pending_flush = 0;
-};
-
-CsvLogState OpenTuningCsvIfEnabled()
-{
-    CsvLogState state;
-    if (!aim::config::kEnableTuningCsvLog)
-    {
-        return state;
-    }
-
-    if (!aim::EnsureLogsDirectory())
-    {
-        std::cerr << "调参日志目录创建失败: logs\n";
-        return state;
-    }
-
-    const std::string csv_path = aim::BuildTuningCsvPath();
-    state.file.open(csv_path, std::ios::out | std::ios::trunc);
-    if (!state.file.is_open())
-    {
-        std::cerr << "调参日志创建失败: " << csv_path << "\n";
-        return state;
-    }
-
-    state.file << "t_ms,frame,aim,preview,cap_ok,infer_ok,det_count,target_locked,target_dist_px,"
-                  "target_x,target_y,error_x,error_y,error_dist,move_raw_x,move_raw_y,"
-                  "move_post_gain_x,move_post_gain_y,move_filtered_x,move_filtered_y,"
-                  "cmd_dx,cmd_dy,use_relative,deadzone,dt_s,cap_ms,infer_ms,decode_ms,total_ms\n";
-    std::cout << "调参日志: " << csv_path << "\n";
-    return state;
-}
-
-void WriteCsvRow(
-    CsvLogState& csv,
-    long long frame_index,
-    bool aim_enabled,
-    bool preview_enabled,
-    bool capture_ok,
-    bool infer_ok,
-    const aim::Detections& detections,
-    bool target_locked,
-    bool has_target_for_log,
-    const aim::TargetPoint& selected_target,
-    const aim::AimDebugSnapshot& dbg,
-    double capture_ms,
-    double infer_ms,
-    double decode_ms,
-    std::chrono::steady_clock::time_point app_start_time)
-{
-    if (!csv.file.is_open())
-    {
-        return;
-    }
-
-    if (aim::config::kTuningCsvLogOnlyAimEnabled && !aim_enabled)
-    {
-        return;
-    }
-
-    const double total_ms = capture_ms + infer_ms + decode_ms;
-    const double t_ms =
-        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - app_start_time).count();
-
-    csv.file << std::fixed << std::setprecision(3)
-             << t_ms << ","
-             << frame_index << ","
-             << (aim_enabled ? 1 : 0) << ","
-             << (preview_enabled ? 1 : 0) << ","
-             << (capture_ok ? 1 : 0) << ","
-             << (infer_ok ? 1 : 0) << ","
-             << detections.size() << ","
-             << (target_locked ? 1 : 0) << ","
-             << (has_target_for_log ? selected_target.distance : 0.0f) << ","
-             << (has_target_for_log ? selected_target.x : 0.0f) << ","
-             << (has_target_for_log ? selected_target.y : 0.0f) << ","
-             << dbg.error_x << ","
-             << dbg.error_y << ","
-             << dbg.error_dist << ","
-             << dbg.move_raw_x << ","
-             << dbg.move_raw_y << ","
-             << dbg.move_post_gain_x << ","
-             << dbg.move_post_gain_y << ","
-             << dbg.move_filtered_x << ","
-             << dbg.move_filtered_y << ","
-             << dbg.cmd_dx << ","
-             << dbg.cmd_dy << ","
-             << (dbg.use_relative_mode ? 1 : 0) << ","
-             << (dbg.in_deadzone ? 1 : 0) << ","
-             << dbg.dt_seconds << ","
-             << capture_ms << ","
-             << infer_ms << ","
-             << decode_ms << ","
-             << total_ms
-             << "\n";
-
-    ++csv.pending_flush;
-    if (csv.pending_flush >= std::max(1, aim::config::kTuningCsvFlushIntervalFrames))
-    {
-        csv.file.flush();
-        csv.pending_flush = 0;
-    }
-}
 
 const char* MoveAlgorithmName(aim::config::AimAlgorithm algorithm)
 {
@@ -163,6 +56,7 @@ int main()
     aim::EnableDpiAwareness();
 
     aim::RuntimeTuning runtime_tuning;
+    runtime_tuning.aim_enabled = false;
     runtime_tuning.preview_enabled = aim::config::kShowPreviewWindow;
     runtime_tuning.verbose_log_enabled = aim::config::kEnableVerboseLog;
 
@@ -181,7 +75,7 @@ int main()
               << ", 间隔(ms)=" << std::fixed << std::setprecision(2) << capture_interval_ms
               << ", 取帧超时(ms)=" << aim::config::kDxgiAcquireTimeoutMs << "\n"
               << std::defaultfloat;
-    std::cout << "全局热键: [Q]=开启自瞄, [K]=关闭自瞄, [V]=可视化开关, [B]=控制面板开关, [F6]=退出\n";
+    std::cout << "程序控制全部在 ImGui 面板完成（自瞄/可视化/日志/退出）。\n";
 
     const std::string model_path = aim::ResolveModelPath();
     std::cout << "模型路径: " << model_path << "\n";
@@ -216,22 +110,21 @@ int main()
     target_selector.SetSettings(selector_settings);
 
     aim::ControlPanel control_panel;
-    control_panel.Initialize(runtime_tuning);
-    control_panel.SetVisible(aim::config::kShowControlPanel);
+    if (!control_panel.Initialize(runtime_tuning))
+    {
+        std::cerr << "ImGui 控制面板初始化失败。\n";
+        return 1;
+    }
+    control_panel.SetVisible(true);
 
-    bool aim_enabled = false;
-    int target_head_class_id = aim::HeadClassId();
-    bool prev_q = false;
-    bool prev_k = false;
-    bool prev_v = false;
-    bool prev_b = false;
-    bool prev_exit = false;
+    const int target_head_class_id = aim::HeadClassId();
+    bool prev_aim_enabled = runtime_tuning.aim_enabled;
+    bool prev_preview_enabled = runtime_tuning.preview_enabled;
 
     std::cout << "默认目标: " << aim::TargetClassName(target_head_class_id) << "\n";
+    std::cout << "默认自瞄: " << (runtime_tuning.aim_enabled ? "开" : "关") << "\n";
     std::cout << "默认可视化: " << (runtime_tuning.preview_enabled ? "开" : "关") << "\n";
-    std::cout << "默认控制面板: " << (control_panel.IsVisible() ? "开" : "关") << "\n";
 
-    CsvLogState tuning_csv = OpenTuningCsvIfEnabled();
     aim::PerfLogger perf_logger;
 
     bool high_precision_timer_set = false;
@@ -246,13 +139,9 @@ int main()
 
     auto next_capture_tick = Clock::now();
     bool pace_started = false;
-    long long frame_index = 0;
-    const auto app_start_time = Clock::now();
 
     while (true)
     {
-        ++frame_index;
-
         if (aim::config::kLimitCaptureRate)
         {
             if (!pace_started)
@@ -273,6 +162,29 @@ int main()
         }
 
         control_panel.Poll(runtime_tuning);
+        if (runtime_tuning.request_exit)
+        {
+            std::cout << "[控制面板] 退出\n";
+            break;
+        }
+
+        if (runtime_tuning.preview_enabled != prev_preview_enabled)
+        {
+            if (!runtime_tuning.preview_enabled)
+            {
+                cv::destroyWindow(kPreviewWindowName);
+            }
+            prev_preview_enabled = runtime_tuning.preview_enabled;
+        }
+
+        if (runtime_tuning.aim_enabled != prev_aim_enabled)
+        {
+            target_selector.Reset();
+            aim_control.Reset();
+            prev_aim_enabled = runtime_tuning.aim_enabled;
+            std::cout << "[控制面板] 自瞄已" << (runtime_tuning.aim_enabled ? "开启" : "关闭") << "\n";
+        }
+
         decoder.SetThresholds(runtime_tuning.conf_threshold, runtime_tuning.nms_iou_threshold);
         aim_control.SetRuntimeParams(
             { runtime_tuning.aim_smooth_factor, runtime_tuning.aim_max_step_px, runtime_tuning.aim_deadzone_px });
@@ -284,10 +196,6 @@ int main()
         double decode_ms = 0.0;
         bool capture_ok = false;
         bool infer_ok = false;
-        bool target_locked = false;
-        bool has_target_for_log = false;
-        aim::TargetPoint selected_target;
-        aim::AimDebugSnapshot dbg = {};
 
         cv::Mat frame;
         aim::Detections detections;
@@ -309,7 +217,7 @@ int main()
                 decoder.Decode(raw_output, detections);
                 decode_ms = std::chrono::duration<double, std::milli>(Clock::now() - decode_start).count();
 
-                if (aim_enabled)
+                if (runtime_tuning.aim_enabled)
                 {
                     const float capture_offset_x = static_cast<float>(capturer.getWidth()) * 0.5f -
                         static_cast<float>(aim::config::kCaptureSize) * 0.5f;
@@ -330,12 +238,7 @@ int main()
                     {
                         target.x = std::clamp(target.x, 0.0f, static_cast<float>(screen_width - 1));
                         target.y = std::clamp(target.y, 0.0f, static_cast<float>(screen_height - 1));
-                        selected_target = target;
-                        has_target_for_log = true;
-
                         aim_control.MoveToTarget(mouse, target.x, target.y, screen_width, screen_height);
-                        target_locked = true;
-                        dbg = aim_control.LastDebug();
                     }
                     else
                     {
@@ -348,7 +251,7 @@ int main()
                     aim::DrawPreview(
                         frame,
                         detections,
-                        aim_enabled,
+                        runtime_tuning.aim_enabled,
                         target_head_class_id,
                         runtime_tuning.active_circle_radius_px);
                     cv::imshow(kPreviewWindowName, frame);
@@ -357,59 +260,6 @@ int main()
         }
 
         perf_logger.AddSample({ capture_ms, infer_ms, decode_ms, capture_ok, infer_ok });
-
-        if (aim::KeyPressedEdge(aim::config::kHotkeyEnableAim, prev_q))
-        {
-            aim_enabled = true;
-            target_selector.Reset();
-            aim_control.Reset();
-            std::cout << "[热键] 自瞄已开启\n";
-        }
-        if (aim::KeyPressedEdge(aim::config::kHotkeyDisableAim, prev_k))
-        {
-            aim_enabled = false;
-            target_selector.Reset();
-            aim_control.Reset();
-            std::cout << "[热键] 自瞄已关闭\n";
-        }
-        if (aim::KeyPressedEdge(aim::config::kHotkeyTogglePreview, prev_v))
-        {
-            runtime_tuning.preview_enabled = !runtime_tuning.preview_enabled;
-            control_panel.SyncFromRuntime(runtime_tuning);
-            if (!runtime_tuning.preview_enabled)
-            {
-                cv::destroyWindow(kPreviewWindowName);
-            }
-            std::cout << "[热键] 可视化已" << (runtime_tuning.preview_enabled ? "开启" : "关闭") << "\n";
-        }
-        if (aim::KeyPressedEdge(aim::config::kHotkeyToggleControlPanel, prev_b))
-        {
-            control_panel.SetVisible(!control_panel.IsVisible());
-            std::cout << "[热键] 控制面板已" << (control_panel.IsVisible() ? "开启" : "关闭") << "\n";
-        }
-        if (aim::KeyPressedEdge(aim::config::kHotkeyExit, prev_exit))
-        {
-            std::cout << "[热键] 退出\n";
-            break;
-        }
-
-        WriteCsvRow(
-            tuning_csv,
-            frame_index,
-            aim_enabled,
-            runtime_tuning.preview_enabled,
-            capture_ok,
-            infer_ok,
-            detections,
-            target_locked,
-            has_target_for_log,
-            selected_target,
-            dbg,
-            capture_ms,
-            infer_ms,
-            decode_ms,
-            app_start_time);
-
         if (perf_logger.ShouldPrint(aim::config::kVerboseLogIntervalMs))
         {
             if (runtime_tuning.verbose_log_enabled)
@@ -427,7 +277,7 @@ int main()
             cv::waitKey(1);
         }
 
-        if (!aim::config::kLimitCaptureRate && !runtime_tuning.preview_enabled && !control_panel.IsVisible())
+        if (!aim::config::kLimitCaptureRate && !runtime_tuning.preview_enabled)
         {
             Sleep(aim::config::kLoopSleepMs);
         }
@@ -441,11 +291,6 @@ int main()
         timeEndPeriod(1);
     }
 
-    if (tuning_csv.file.is_open())
-    {
-        tuning_csv.file.flush();
-        tuning_csv.file.close();
-    }
-
     return 0;
 }
+

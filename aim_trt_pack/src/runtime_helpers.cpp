@@ -4,7 +4,6 @@
 #include "runtime_helpers.h"
 
 #include <clocale>
-#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -72,41 +71,6 @@ std::string ResolveModelPath()
     return "models\\CS2_1_CLS_Sim.onnx";
 }
 
-std::string BuildTuningCsvPath()
-{
-    SYSTEMTIME st = {};
-    GetLocalTime(&st);
-    char filename[128] = { 0 };
-    std::snprintf(
-        filename,
-        sizeof(filename),
-        "logs\\aim_debug_%04d%02d%02d_%02d%02d%02d.csv",
-        st.wYear,
-        st.wMonth,
-        st.wDay,
-        st.wHour,
-        st.wMinute,
-        st.wSecond);
-    return std::string(filename);
-}
-
-bool EnsureLogsDirectory()
-{
-    if (CreateDirectoryA("logs", nullptr) != 0)
-    {
-        return true;
-    }
-    return GetLastError() == ERROR_ALREADY_EXISTS;
-}
-
-bool KeyPressedEdge(int vk, bool& prev_down)
-{
-    const bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
-    const bool edge = down && !prev_down;
-    prev_down = down;
-    return edge;
-}
-
 void ConfigureConsoleUtf8()
 {
     SetConsoleOutputCP(CP_UTF8);
@@ -143,4 +107,3 @@ void PreciseSleepUntil(const std::chrono::steady_clock::time_point& target_time)
 }
 
 } // namespace aim
-

@@ -27,9 +27,6 @@ inline constexpr int kDxgiAcquireTimeoutMs = 1;
 inline constexpr bool kUseHighPrecisionTimer = true;
 inline constexpr bool kEnableVerboseLog = true;
 inline constexpr int kVerboseLogIntervalMs = 1000;
-inline constexpr bool kEnableTuningCsvLog = true;
-inline constexpr bool kTuningCsvLogOnlyAimEnabled = true;
-inline constexpr int kTuningCsvFlushIntervalFrames = 60;
 
 // Detection
 inline constexpr float kConfThreshold = 0.75f;
@@ -78,13 +75,6 @@ inline constexpr float kAimQuantizerMaxCarryPx = 4.0f;
 inline constexpr float kAimQuantizerEnableErrorPx = 8.0f;
 inline constexpr float kAimStickyHoldEnterPx = 2.2f;
 inline constexpr float kAimStickyHoldExitPx = 4.8f;
-
-// Hotkeys
-inline constexpr int kHotkeyEnableAim = 'Q';
-inline constexpr int kHotkeyDisableAim = 'K';
-inline constexpr int kHotkeyTogglePreview = 'V';
-inline constexpr int kHotkeyToggleControlPanel = 'B';
-inline constexpr int kHotkeyExit = 0x75; // VK_F6
 
 // TensorRT provider options
 inline constexpr bool kTrtFp16Enable = true;

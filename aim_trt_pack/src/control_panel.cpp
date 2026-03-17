@@ -1,6 +1,7 @@
 #include "control_panel.h"
 
 #include <algorithm>
+#include <array>
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -11,13 +12,41 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 namespace {
 
 constexpr const char* kWindowClassName = "AimControlPanelWindowClass";
-constexpr const char* kWindowTitle = "Aim Runtime Control Panel";
+constexpr const char* kWindowTitle = "自瞄控制面板";
 
 void SafeRelease(IUnknown* ptr)
 {
     if (ptr != nullptr)
     {
         ptr->Release();
+    }
+}
+
+void LoadChineseFont()
+{
+    ImGuiIO& io = ImGui::GetIO();
+    const ImWchar* glyph_ranges = io.Fonts->GetGlyphRangesChineseFull();
+    const std::array<const char*, 5> font_paths = {
+        "C:\\Windows\\Fonts\\msyh.ttc",   // 微软雅黑
+        "C:\\Windows\\Fonts\\msyh.ttf",
+        "C:\\Windows\\Fonts\\simhei.ttf", // 黑体
+        "C:\\Windows\\Fonts\\simsun.ttc", // 宋体
+        "C:\\Windows\\Fonts\\Deng.ttf"    // 等线
+    };
+
+    for (const char* path : font_paths)
+    {
+        if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES)
+        {
+            continue;
+        }
+
+        ImFont* font = io.Fonts->AddFontFromFileTTF(path, 18.0f, nullptr, glyph_ranges);
+        if (font != nullptr)
+        {
+            io.FontDefault = font;
+            return;
+        }
     }
 }
 
@@ -44,6 +73,7 @@ bool ControlPanel::Initialize(const RuntimeTuning& tuning)
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    LoadChineseFont();
     ImGui::StyleColorsDark();
     ImGui::GetIO().IniFilename = nullptr;
 
@@ -51,6 +81,7 @@ bool ControlPanel::Initialize(const RuntimeTuning& tuning)
     ImGui_ImplDX11_Init(d3d_device_, d3d_device_context_);
 
     initialized_ = true;
+    SetVisible(true);
     return true;
 }
 
@@ -140,14 +171,15 @@ bool ControlPanel::CreateWindowAndDevice()
         return false;
     }
 
+    const DWORD window_style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     hwnd_ = CreateWindowA(
         kWindowClassName,
         kWindowTitle,
-        WS_OVERLAPPEDWINDOW,
+        window_style,
         180,
         180,
+        560,
         520,
-        430,
         nullptr,
         nullptr,
         window_class_.hInstance,
@@ -269,28 +301,43 @@ void ControlPanel::HandleResize(unsigned int width, unsigned int height)
 
 void ControlPanel::RenderUi(RuntimeTuning& tuning)
 {
-    SyncFromRuntime(tuning);
-
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    ImGui::SetNextWindowSize(ImVec2(460.0f, 320.0f), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Runtime Tuning", nullptr, ImGuiWindowFlags_NoCollapse);
-    ImGui::Text("Live settings (apply instantly)");
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::Begin(
+        "主面板",
+        nullptr,
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings);
+    ImGui::Text("实时参数控制（修改后立即生效）");
     ImGui::Separator();
 
-    ImGui::SliderFloat("Conf Threshold", &tuning_cache_.conf_threshold, 0.01f, 1.00f, "%.2f");
-    ImGui::SliderFloat("NMS IoU", &tuning_cache_.nms_iou_threshold, 0.01f, 1.00f, "%.2f");
-    ImGui::SliderFloat("Active Radius(px)", &tuning_cache_.active_circle_radius_px, 10.0f, 400.0f, "%.0f");
-    ImGui::SliderFloat("Aim Smooth", &tuning_cache_.aim_smooth_factor, 0.10f, 2.00f, "%.2f");
-    ImGui::SliderFloat("Aim Max Step", &tuning_cache_.aim_max_step_px, 1.0f, 500.0f, "%.0f");
-    ImGui::SliderFloat("Aim Deadzone", &tuning_cache_.aim_deadzone_px, 0.0f, 10.0f, "%.1f");
-    ImGui::Checkbox("Preview Window", &tuning_cache_.preview_enabled);
-    ImGui::Checkbox("Verbose Log", &tuning_cache_.verbose_log_enabled);
+    ImGui::Checkbox("开启自瞄", &tuning_cache_.aim_enabled);
+    ImGui::Checkbox("开启可视化窗口", &tuning_cache_.preview_enabled);
+    ImGui::Checkbox("开启性能日志", &tuning_cache_.verbose_log_enabled);
     ImGui::Separator();
-    ImGui::Text("Hotkeys: Q=Enable  K=Disable  V=Preview  B=Panel  F6=Exit");
+
+    ImGui::SliderFloat("置信度阈值", &tuning_cache_.conf_threshold, 0.01f, 1.00f, "%.2f");
+    ImGui::SliderFloat("NMS IoU 阈值", &tuning_cache_.nms_iou_threshold, 0.01f, 1.00f, "%.2f");
+    ImGui::SliderFloat("中心激活半径(px)", &tuning_cache_.active_circle_radius_px, 10.0f, 400.0f, "%.0f");
+    ImGui::SliderFloat("自瞄平滑系数", &tuning_cache_.aim_smooth_factor, 0.10f, 2.00f, "%.2f");
+    ImGui::SliderFloat("最大单步移动(px)", &tuning_cache_.aim_max_step_px, 1.0f, 500.0f, "%.0f");
+    ImGui::SliderFloat("瞄准死区(px)", &tuning_cache_.aim_deadzone_px, 0.0f, 10.0f, "%.1f");
+    ImGui::Separator();
+
+    if (ImGui::Button("退出程序", ImVec2(160.0f, 0.0f)))
+    {
+        tuning_cache_.request_exit = true;
+    }
+
     ImGui::End();
+    ImGui::PopStyleVar(2);
 
     ApplyRuntimeLimits(tuning_cache_);
     tuning = tuning_cache_;
@@ -345,8 +392,7 @@ LRESULT CALLBACK ControlPanel::WndProc(HWND hwnd, UINT msg, WPARAM w_param, LPAR
         }
         return 0;
     case WM_CLOSE:
-        self->visible_ = false;
-        ShowWindow(hwnd, SW_HIDE);
+        self->tuning_cache_.request_exit = true;
         return 0;
     default:
         break;

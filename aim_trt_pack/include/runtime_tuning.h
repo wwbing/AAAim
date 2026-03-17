@@ -5,6 +5,7 @@
 namespace aim {
 
 struct RuntimeTuning {
+    bool aim_enabled = false;
     float conf_threshold = config::kConfThreshold;
     float nms_iou_threshold = config::kNmsIouThreshold;
     float active_circle_radius_px = config::kAimActiveCircleRadiusPx;
@@ -13,7 +14,7 @@ struct RuntimeTuning {
     float aim_deadzone_px = config::kAimDeadzonePx;
     bool preview_enabled = config::kShowPreviewWindow;
     bool verbose_log_enabled = config::kEnableVerboseLog;
+    bool request_exit = false;
 };
 
 } // namespace aim
-
