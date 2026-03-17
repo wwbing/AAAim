@@ -19,6 +19,7 @@ enum class AimMoveMode {
 // Capture
 inline constexpr int kCaptureSize = 640;
 inline constexpr bool kShowPreviewWindow = false;
+inline constexpr bool kShowControlPanel = true;
 inline constexpr int kLoopSleepMs = 0;
 inline constexpr bool kLimitCaptureRate = false;
 inline constexpr int kCaptureTargetFps = 30;
@@ -82,6 +83,7 @@ inline constexpr float kAimStickyHoldExitPx = 4.8f;
 inline constexpr int kHotkeyEnableAim = 'Q';
 inline constexpr int kHotkeyDisableAim = 'K';
 inline constexpr int kHotkeyTogglePreview = 'V';
+inline constexpr int kHotkeyToggleControlPanel = 'B';
 inline constexpr int kHotkeyExit = 0x75; // VK_F6
 
 // TensorRT provider options

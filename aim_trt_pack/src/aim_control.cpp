@@ -22,6 +22,13 @@ AimControl::AimControl(
 {
 }
 
+void AimControl::SetRuntimeParams(const AimRuntimeParams& params)
+{
+    smooth_factor_ = std::clamp(params.smooth_factor, 0.01f, 2.00f);
+    max_step_px_ = std::clamp(params.max_step_px, 1.0f, 800.0f);
+    deadzone_px_ = std::clamp(params.deadzone_px, 0.0f, 100.0f);
+}
+
 void AimControl::Reset()
 {
     pid_initialized_ = false;

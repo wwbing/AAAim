@@ -5,7 +5,15 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(DEFINED ENV{VCPKG_ROOT})
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{VCPKG_ROOT}/installed/x64-windows")
+endif()
+if(EXISTS "D:/vcpkg/installed/x64-windows/share/imgui/imgui-config.cmake")
+    list(APPEND CMAKE_PREFIX_PATH "D:/vcpkg/installed/x64-windows")
+endif()
+
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui dnn)
+find_package(imgui CONFIG REQUIRED)
 get_filename_component(OpenCV_INSTALL_ROOT "${OpenCV_DIR}/../.." ABSOLUTE)
 
 set(ONNXRUNTIME_ROOT
@@ -27,15 +35,15 @@ add_executable(aim_stable
     src/ort_trt_infer.cpp
     src/yolo_decoder.cpp
     src/aim_control.cpp
-)
-
-add_executable(dll_motion_demo
-    src/dll_motion_demo.cpp
+    src/runtime_helpers.cpp
+    src/target_selector.cpp
+    src/preview_renderer.cpp
+    src/perf_logger.cpp
+    src/control_panel.cpp
 )
 
 if(MSVC)
     target_compile_options(aim_stable PRIVATE /utf-8)
-    target_compile_options(dll_motion_demo PRIVATE /utf-8)
 endif()
 
 target_include_directories(aim_stable PRIVATE
@@ -47,20 +55,14 @@ target_include_directories(aim_stable PRIVATE
 target_link_libraries(aim_stable PRIVATE
     ${OpenCV_LIBS}
     ${ONNXRUNTIME_LIB}
+    imgui::imgui
 )
-
-target_include_directories(dll_motion_demo PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-if(WIN32)
-    target_link_libraries(dll_motion_demo PRIVATE user32)
-endif()
 
 if(WIN32)
     target_link_libraries(aim_stable PRIVATE
         d3d11
         dxgi
+        imm32
     )
 
     add_custom_command(TARGET aim_stable POST_BUILD
@@ -73,12 +75,6 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ONNXRUNTIME_ROOT}/lib"
             "$<TARGET_FILE_DIR:aim_stable>"
-    )
-
-    add_custom_command(TARGET dll_motion_demo POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/runtime/ddll64.dll"
-            "$<TARGET_FILE_DIR:dll_motion_demo>/ddll64.dll"
     )
 
     if(EXISTS "${OpenCV_INSTALL_ROOT}/bin")

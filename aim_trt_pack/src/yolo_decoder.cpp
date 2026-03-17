@@ -12,6 +12,12 @@ YoloDecoder::YoloDecoder(float conf_threshold, float nms_iou_threshold)
 {
 }
 
+void YoloDecoder::SetThresholds(float conf_threshold, float nms_iou_threshold)
+{
+    conf_threshold_ = std::clamp(conf_threshold, 0.01f, 1.00f);
+    nms_iou_threshold_ = std::clamp(nms_iou_threshold, 0.01f, 1.00f);
+}
+
 void YoloDecoder::Decode(const RawTensor& output, Detections& detections) const
 {
     detections.clear();

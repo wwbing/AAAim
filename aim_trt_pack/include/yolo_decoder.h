@@ -7,6 +7,7 @@ namespace aim {
 class YoloDecoder {
 public:
     YoloDecoder(float conf_threshold, float nms_iou_threshold);
+    void SetThresholds(float conf_threshold, float nms_iou_threshold);
 
     void Decode(const RawTensor& output, Detections& detections) const;
     bool SelectNearestTarget(

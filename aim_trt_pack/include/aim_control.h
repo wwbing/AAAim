@@ -29,6 +29,12 @@ struct AimDebugSnapshot {
     float dt_seconds = 0.0f;
 };
 
+struct AimRuntimeParams {
+    float smooth_factor = config::kAimSmoothFactor;
+    float max_step_px = config::kAimMaxStepPx;
+    float deadzone_px = config::kAimDeadzonePx;
+};
+
 class AimControl {
 public:
     AimControl(
@@ -44,6 +50,7 @@ public:
         float target_y,
         int screen_width,
         int screen_height);
+    void SetRuntimeParams(const AimRuntimeParams& params);
     const AimDebugSnapshot& LastDebug() const { return last_debug_; }
 
 private:
