@@ -24,6 +24,7 @@ inline constexpr int kLoopSleepMs = 0;
 inline constexpr bool kLimitCaptureRate = false;
 inline constexpr int kCaptureTargetFps = 30;
 inline constexpr int kDxgiAcquireTimeoutMs = 1;
+inline constexpr bool kForceGdiCapture = true;
 inline constexpr bool kUseHighPrecisionTimer = true;
 inline constexpr bool kEnableVerboseLog = true;
 inline constexpr int kVerboseLogIntervalMs = 1000;
@@ -77,11 +78,18 @@ inline constexpr float kAimStickyHoldEnterPx = 2.2f;
 inline constexpr float kAimStickyHoldExitPx = 4.8f;
 
 // TensorRT provider options
+inline constexpr bool kPreferTensorRt = false;    // 设为 true 则优先 TensorRT（首次构建可能很慢）
+inline constexpr bool kEnableCudaFallback = true; // TensorRT 不可用时回退 CUDA
+inline constexpr bool kEnableCpuFallback = true;  // CUDA 不可用时回退 CPU
 inline constexpr bool kTrtFp16Enable = true;
 inline constexpr bool kTrtEngineCacheEnable = true;
-inline constexpr bool kTrtTimingCacheEnable = false;
-inline constexpr bool kTrtForceSequentialEngineBuild = false;
-inline constexpr int kTrtBuilderOptimizationLevel = 5;
+inline constexpr bool kTrtTimingCacheEnable = true;
+inline constexpr bool kTrtForceSequentialEngineBuild = true;
+inline constexpr int kTrtBuilderOptimizationLevel = 2;
+inline constexpr bool kTrtBuildHeuristicsEnable = true;
+inline constexpr int kTrtMinSubgraphSize = 10;
+inline constexpr int kTrtMaxPartitionIterations = 20;
+inline constexpr int kInitSlowWarnSeconds = 120;
 
 } // namespace config
 } // namespace aim

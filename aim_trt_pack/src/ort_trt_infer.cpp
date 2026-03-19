@@ -6,6 +6,7 @@
 
 #include <windows.h>
 
+#include <array>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -37,77 +38,107 @@ OrtTrtInfer::OrtTrtInfer(int input_size)
 
 bool OrtTrtInfer::Initialize(const std::string& model_path)
 {
-    try
+    if (config::kEnableVerboseLog)
     {
-        if (config::kEnableVerboseLog)
+        std::cout << "[初始化] ORT 开始初始化, 模型=" << model_path << "\n";
+    }
+
+    const std::wstring model_path_w = ToWideString(model_path);
+    session_.reset();
+    backend_name_ = "CPU";
+    trt_cache_dir_.clear();
+
+    auto make_default_options = []() {
+        Ort::SessionOptions options;
+        options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
+        return options;
+    };
+
+    if (config::kPreferTensorRt)
+    {
+        try
         {
-            std::cout << "[初始化] ORT 开始初始化, 模型=" << model_path << "\n";
+            Ort::SessionOptions trt_options = make_default_options();
+            if (AppendTensorRtProvider(trt_options))
+            {
+                if (config::kEnableVerboseLog)
+                {
+                    std::cout << "[初始化] 正在创建 ORT Session（TensorRT）...\n";
+                }
+                if (CreateSessionWithOptions(model_path_w, trt_options, "TensorRT"))
+                {
+                    return true;
+                }
+            }
         }
-
-        session_options_.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-        session_options_.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
-
-        if (!AppendTensorRtProvider())
+        catch (const Ort::Exception& ex)
         {
             if (config::kEnableVerboseLog)
             {
-                std::cout << "[初始化] 挂载 TensorRT Provider 失败。\n";
+                std::cerr << "[初始化] TensorRT 创建异常: " << ex.what() << "\n";
             }
-            return false;
         }
-        backend_name_ = "TensorRT";
-
         if (config::kEnableVerboseLog)
         {
-            std::cout << "[初始化] 正在创建 ORT Session（首次会构建 TRT 引擎，耗时会较长）...\n";
+            std::cerr << "[初始化] TensorRT 初始化失败，准备回退到 CUDA。\n";
         }
-
-        const std::wstring model_path_w = ToWideString(model_path);
-        session_ = std::make_unique<Ort::Session>(env_, model_path_w.c_str(), session_options_);
-
-        Ort::AllocatorWithDefaultOptions allocator;
-
-        const size_t input_count = session_->GetInputCount();
-        input_names_.clear();
-        input_name_ptrs_.clear();
-        input_names_.reserve(input_count);
-        input_name_ptrs_.reserve(input_count);
-        for (size_t i = 0; i < input_count; ++i)
-        {
-            auto name = session_->GetInputNameAllocated(i, allocator);
-            input_names_.push_back(name ? name.get() : "");
-            input_name_ptrs_.push_back(input_names_.back().c_str());
-        }
-
-        const size_t output_count = session_->GetOutputCount();
-        output_names_.clear();
-        output_name_ptrs_.clear();
-        output_names_.reserve(output_count);
-        output_name_ptrs_.reserve(output_count);
-        for (size_t i = 0; i < output_count; ++i)
-        {
-            auto name = session_->GetOutputNameAllocated(i, allocator);
-            output_names_.push_back(name ? name.get() : "");
-            output_name_ptrs_.push_back(output_names_.back().c_str());
-        }
-
-        if (config::kEnableVerboseLog)
-        {
-            std::cout << "[初始化] Session 就绪。输入数=" << input_count
-                      << ", 输出数=" << output_count
-                      << ", TRT缓存目录=" << trt_cache_dir_ << "\n";
-        }
-
-        return !input_name_ptrs_.empty() && !output_name_ptrs_.empty();
     }
-    catch (const Ort::Exception& ex)
+
+    if (config::kEnableCudaFallback)
     {
+        try
+        {
+            Ort::SessionOptions cuda_options = make_default_options();
+            if (AppendCudaProvider(cuda_options))
+            {
+                if (config::kEnableVerboseLog)
+                {
+                    std::cout << "[初始化] 正在创建 ORT Session（CUDA）...\n";
+                }
+                if (CreateSessionWithOptions(model_path_w, cuda_options, "CUDA"))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (const Ort::Exception& ex)
+        {
+            if (config::kEnableVerboseLog)
+            {
+                std::cerr << "[初始化] CUDA 创建异常: " << ex.what() << "\n";
+            }
+        }
         if (config::kEnableVerboseLog)
         {
-            std::cerr << "[初始化] ORT 异常: " << ex.what() << "\n";
+            std::cerr << "[初始化] CUDA 初始化失败。\n";
         }
-        return false;
     }
+
+    if (config::kEnableCpuFallback)
+    {
+        try
+        {
+            Ort::SessionOptions cpu_options = make_default_options();
+            if (config::kEnableVerboseLog)
+            {
+                std::cout << "[初始化] 正在创建 ORT Session（CPU 回退）...\n";
+            }
+            if (CreateSessionWithOptions(model_path_w, cpu_options, "CPU"))
+            {
+                return true;
+            }
+        }
+        catch (const Ort::Exception& ex)
+        {
+            if (config::kEnableVerboseLog)
+            {
+                std::cerr << "[初始化] CPU 创建异常: " << ex.what() << "\n";
+            }
+        }
+    }
+
+    return false;
 }
 
 bool OrtTrtInfer::Run(const cv::Mat& bgr, RawTensor& output)
@@ -170,7 +201,65 @@ bool OrtTrtInfer::Run(const cv::Mat& bgr, RawTensor& output)
     return true;
 }
 
-bool OrtTrtInfer::AppendTensorRtProvider()
+bool OrtTrtInfer::CreateSessionWithOptions(
+    const std::wstring& model_path_w,
+    Ort::SessionOptions& session_options,
+    const std::string& backend_name)
+{
+    session_ = std::make_unique<Ort::Session>(env_, model_path_w.c_str(), session_options);
+    backend_name_ = backend_name;
+    return RefreshInputOutputMetadata();
+}
+
+bool OrtTrtInfer::RefreshInputOutputMetadata()
+{
+    if (!session_)
+    {
+        return false;
+    }
+
+    Ort::AllocatorWithDefaultOptions allocator;
+
+    const size_t input_count = session_->GetInputCount();
+    input_names_.clear();
+    input_name_ptrs_.clear();
+    input_names_.reserve(input_count);
+    input_name_ptrs_.reserve(input_count);
+    for (size_t i = 0; i < input_count; ++i)
+    {
+        auto name = session_->GetInputNameAllocated(i, allocator);
+        input_names_.push_back(name ? name.get() : "");
+        input_name_ptrs_.push_back(input_names_.back().c_str());
+    }
+
+    const size_t output_count = session_->GetOutputCount();
+    output_names_.clear();
+    output_name_ptrs_.clear();
+    output_names_.reserve(output_count);
+    output_name_ptrs_.reserve(output_count);
+    for (size_t i = 0; i < output_count; ++i)
+    {
+        auto name = session_->GetOutputNameAllocated(i, allocator);
+        output_names_.push_back(name ? name.get() : "");
+        output_name_ptrs_.push_back(output_names_.back().c_str());
+    }
+
+    if (config::kEnableVerboseLog)
+    {
+        std::cout << "[初始化] Session 就绪。后端=" << backend_name_
+                  << ", 输入数=" << input_count
+                  << ", 输出数=" << output_count;
+        if (!trt_cache_dir_.empty())
+        {
+            std::cout << ", TRT缓存目录=" << trt_cache_dir_;
+        }
+        std::cout << "\n";
+    }
+
+    return !input_name_ptrs_.empty() && !output_name_ptrs_.empty();
+}
+
+bool OrtTrtInfer::AppendTensorRtProvider(Ort::SessionOptions& session_options)
 {
     const OrtApi& api = Ort::GetApi();
     OrtTensorRTProviderOptionsV2* trt_options = nullptr;
@@ -211,6 +300,9 @@ bool OrtTrtInfer::AppendTensorRtProvider()
     {
         push_opt("trt_timing_cache_path", trt_cache_dir_);
     }
+    push_opt("trt_build_heuristics_enable", config::kTrtBuildHeuristicsEnable ? "1" : "0");
+    push_opt("trt_min_subgraph_size", std::to_string(config::kTrtMinSubgraphSize));
+    push_opt("trt_max_partition_iterations", std::to_string(config::kTrtMaxPartitionIterations));
 
     std::vector<const char*> values;
     values.reserve(values_str.size());
@@ -231,7 +323,7 @@ bool OrtTrtInfer::AppendTensorRtProvider()
         return false;
     }
 
-    status = api.SessionOptionsAppendExecutionProvider_TensorRT_V2(session_options_, trt_options);
+    status = api.SessionOptionsAppendExecutionProvider_TensorRT_V2(session_options, trt_options);
     api.ReleaseTensorRTProviderOptions(trt_options);
     if (status != nullptr)
     {
@@ -239,6 +331,65 @@ bool OrtTrtInfer::AppendTensorRtProvider()
         if (config::kEnableVerboseLog)
         {
             std::cerr << "[初始化] 挂载 TensorRT 执行器失败: " << err << "\n";
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool OrtTrtInfer::AppendCudaProvider(Ort::SessionOptions& session_options)
+{
+    const OrtApi& api = Ort::GetApi();
+    OrtCUDAProviderOptionsV2* cuda_options = nullptr;
+
+    OrtStatus* status = api.CreateCUDAProviderOptions(&cuda_options);
+    if (status != nullptr || cuda_options == nullptr)
+    {
+        const std::string err = OrtStatusToString(status);
+        if (config::kEnableVerboseLog)
+        {
+            std::cerr << "[初始化] CreateCUDAProviderOptions 失败: " << err << "\n";
+        }
+        return false;
+    }
+
+    std::vector<const char*> keys;
+    std::vector<std::string> values_str;
+    auto push_opt = [&](const char* key, const std::string& value) {
+        keys.push_back(key);
+        values_str.push_back(value);
+    };
+
+    push_opt("device_id", "0");
+
+    std::vector<const char*> values;
+    values.reserve(values_str.size());
+    for (const auto& v : values_str)
+    {
+        values.push_back(v.c_str());
+    }
+
+    status = api.UpdateCUDAProviderOptions(cuda_options, keys.data(), values.data(), keys.size());
+    if (status != nullptr)
+    {
+        api.ReleaseCUDAProviderOptions(cuda_options);
+        const std::string err = OrtStatusToString(status);
+        if (config::kEnableVerboseLog)
+        {
+            std::cerr << "[初始化] UpdateCUDAProviderOptions 失败: " << err << "\n";
+        }
+        return false;
+    }
+
+    status = api.SessionOptionsAppendExecutionProvider_CUDA_V2(session_options, cuda_options);
+    api.ReleaseCUDAProviderOptions(cuda_options);
+    if (status != nullptr)
+    {
+        const std::string err = OrtStatusToString(status);
+        if (config::kEnableVerboseLog)
+        {
+            std::cerr << "[初始化] 挂载 CUDA 执行器失败: " << err << "\n";
         }
         return false;
     }

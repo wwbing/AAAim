@@ -77,19 +77,22 @@ if(WIN32)
             "$<TARGET_FILE_DIR:aim_stable>"
     )
 
-    if(EXISTS "${OpenCV_INSTALL_ROOT}/bin")
-        add_custom_command(TARGET aim_stable POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${OpenCV_INSTALL_ROOT}/bin"
-                "$<TARGET_FILE_DIR:aim_stable>"
-        )
-    endif()
-
-    if(EXISTS "${OpenCV_INSTALL_ROOT}/debug/bin")
-        add_custom_command(TARGET aim_stable POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${OpenCV_INSTALL_ROOT}/debug/bin"
-                "$<TARGET_FILE_DIR:aim_stable>"
-        )
+    string(TOLOWER "${CMAKE_BUILD_TYPE}" AIM_BUILD_TYPE_LOWER)
+    if(AIM_BUILD_TYPE_LOWER STREQUAL "debug")
+        if(EXISTS "${OpenCV_INSTALL_ROOT}/debug/bin")
+            add_custom_command(TARGET aim_stable POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${OpenCV_INSTALL_ROOT}/debug/bin"
+                    "$<TARGET_FILE_DIR:aim_stable>"
+            )
+        endif()
+    else()
+        if(EXISTS "${OpenCV_INSTALL_ROOT}/bin")
+            add_custom_command(TARGET aim_stable POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${OpenCV_INSTALL_ROOT}/bin"
+                    "$<TARGET_FILE_DIR:aim_stable>"
+            )
+        endif()
     endif()
 endif()

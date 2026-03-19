@@ -1,7 +1,8 @@
-#include "control_panel.h"
+﻿#include "control_panel.h"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -27,11 +28,11 @@ void LoadChineseFont()
     ImGuiIO& io = ImGui::GetIO();
     const ImWchar* glyph_ranges = io.Fonts->GetGlyphRangesChineseFull();
     const std::array<const char*, 5> font_paths = {
-        "C:\\Windows\\Fonts\\msyh.ttc",   // 微软雅黑
+        "C:\\Windows\\Fonts\\msyh.ttc",   // 寰蒋闆呴粦
         "C:\\Windows\\Fonts\\msyh.ttf",
-        "C:\\Windows\\Fonts\\simhei.ttf", // 黑体
-        "C:\\Windows\\Fonts\\simsun.ttc", // 宋体
-        "C:\\Windows\\Fonts\\Deng.ttf"    // 等线
+        "C:\\Windows\\Fonts\\simhei.ttf", // 榛戜綋
+        "C:\\Windows\\Fonts\\simsun.ttc", // 瀹嬩綋
+        "C:\\Windows\\Fonts\\Deng.ttf"    // 绛夌嚎
     };
 
     for (const char* path : font_paths)
@@ -318,6 +319,34 @@ void ControlPanel::RenderUi(RuntimeTuning& tuning)
     ImGui::Text("实时参数控制（修改后立即生效）");
     ImGui::Separator();
 
+    if (tuning_cache_.init_in_progress || tuning_cache_.init_failed || tuning_cache_.init_progress > 0.0f ||
+        !tuning_cache_.init_status_text.empty())
+    {
+        ImGui::Text("初始化状态");
+        if (tuning_cache_.init_failed)
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 90, 90, 255));
+            ImGui::TextWrapped("%s", tuning_cache_.init_status_text.c_str());
+            ImGui::PopStyleColor();
+        }
+        else
+        {
+            const char* status_text = tuning_cache_.init_status_text.empty()
+                ? (tuning_cache_.init_in_progress ? "初始化中..." : "初始化完成")
+                : tuning_cache_.init_status_text.c_str();
+            ImGui::TextWrapped("%s", status_text);
+        }
+                float shown_progress = tuning_cache_.init_progress;
+        if (tuning_cache_.init_in_progress && shown_progress < 0.0f)
+        {
+            shown_progress =
+                0.2f + 0.6f * (0.5f + 0.5f * std::sin(static_cast<float>(ImGui::GetTime() * 2.2)));
+            ImGui::TextUnformatted("进度条为活动指示，不代表真实百分比");
+        }
+        ImGui::ProgressBar(std::clamp(shown_progress, 0.0f, 1.0f), ImVec2(-1.0f, 0.0f));
+        ImGui::Separator();
+    }
+
     ImGui::Checkbox("开启自瞄", &tuning_cache_.aim_enabled);
     ImGui::Checkbox("开启可视化窗口", &tuning_cache_.preview_enabled);
     ImGui::Checkbox("开启性能日志", &tuning_cache_.verbose_log_enabled);
@@ -402,3 +431,4 @@ LRESULT CALLBACK ControlPanel::WndProc(HWND hwnd, UINT msg, WPARAM w_param, LPAR
 }
 
 } // namespace aim
+

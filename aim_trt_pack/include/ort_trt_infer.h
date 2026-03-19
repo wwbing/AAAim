@@ -21,7 +21,13 @@ public:
     const std::string& BackendName() const { return backend_name_; }
 
 private:
-    bool AppendTensorRtProvider();
+    bool AppendTensorRtProvider(Ort::SessionOptions& session_options);
+    bool AppendCudaProvider(Ort::SessionOptions& session_options);
+    bool CreateSessionWithOptions(
+        const std::wstring& model_path_w,
+        Ort::SessionOptions& session_options,
+        const std::string& backend_name);
+    bool RefreshInputOutputMetadata();
     static std::string OrtStatusToString(OrtStatus* status);
     static std::wstring ToWideString(const std::string& text);
     static std::string CurrentExeDir();
@@ -29,7 +35,6 @@ private:
 private:
     int input_size_ = 640;
     Ort::Env env_;
-    Ort::SessionOptions session_options_;
     std::unique_ptr<Ort::Session> session_;
     std::string backend_name_ = "CPU";
     std::string trt_cache_dir_;
@@ -40,4 +45,3 @@ private:
 };
 
 } // namespace aim
-

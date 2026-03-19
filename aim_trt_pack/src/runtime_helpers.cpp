@@ -3,7 +3,6 @@
 
 #include "runtime_helpers.h"
 
-#include <clocale>
 #include <string>
 #include <vector>
 
@@ -75,7 +74,6 @@ void ConfigureConsoleUtf8()
 {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
-    std::setlocale(LC_ALL, ".UTF-8");
 }
 
 void EnableDpiAwareness()
